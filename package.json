@@ -1,0 +1,13 @@
+{
+  "name": "noor-store",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "express": "^5.1.0",
+    "stripe": "^19.1.0"
+  }
+}
