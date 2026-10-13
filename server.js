@@ -1,6 +1,7 @@
 'use strict';
 const express=require('express'),Stripe=require('stripe'),Database=require('better-sqlite3'),path=require('path'),fs=require('fs');
 const app=express(),PORT=process.env.PORT||8080;
+app.use((req,res,next)=>{const origin=req.headers.origin;if(origin==='https://naruhito22-collab.github.io'){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Headers','Content-Type');res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS')}if(req.method==='OPTIONS')return res.sendStatus(204);next()});
 const dataDir=process.env.DATA_DIR||'/data';
 fs.mkdirSync(dataDir,{recursive:true});
 const db=new Database(path.join(dataDir,'noor-store.sqlite'));
