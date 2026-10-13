@@ -8,7 +8,8 @@ const db=new Database(path.join(dataDir,'noor-store.sqlite'));
 db.pragma('journal_mode = WAL');
 db.exec(`CREATE TABLE IF NOT EXISTS stock(code TEXT PRIMARY KEY, quantity INTEGER NOT NULL CHECK(quantity>=0));
 CREATE TABLE IF NOT EXISTS orders(id TEXT PRIMARY KEY, session_id TEXT UNIQUE, status TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS order_items(order_id TEXT NOT NULL, code TEXT NOT NULL, quantity INTEGER NOT NULL, PRIMARY KEY(order_id,code));`);
+CREATE TABLE IF NOT EXISTS order_items(order_id TEXT NOT NULL, code TEXT NOT NULL, quantity INTEGER NOT NULL, PRIMARY KEY(order_id,code));
+CREATE TABLE IF NOT EXISTS shipments(order_id TEXT PRIMARY KEY, shipped_at INTEGER);`);
 const codes=['C','G','F','S','M','D'].flatMap(x=>[1,2,3].map(n=>x+'0'+n));
 const init=db.prepare('INSERT OR IGNORE INTO stock(code,quantity) VALUES (?,9)');
 db.transaction(()=>codes.forEach(c=>init.run(c)))();
@@ -23,6 +24,10 @@ if(order){if(event.type==='checkout.session.completed'&&session.payment_status==
 if(event.type==='checkout.session.expired'||event.type==='checkout.session.async_payment_failed')release(order.id)}
 res.json({received:true})});
 app.use(express.json({limit:'16kb'}));
+function adminAuthorized(req){const crypto=require('crypto');const configured=process.env.ADMIN_PASSWORD||'';const supplied=req.headers['x-admin-password'];if(configured.length<16||typeof supplied!=='string')return false;const a=Buffer.from(configured),b=Buffer.from(supplied);return a.length===b.length&&crypto.timingSafeEqual(a,b)}
+function adminGate(req,res,next){res.setHeader('Cache-Control','no-store');if(!adminAuthorized(req))return res.status(401).json({error:'管理者認証が必要です'});next()}
+app.get('/api/admin/orders',adminGate,(req,res)=>{const orders=db.prepare("SELECT id,session_id,status,created_at FROM orders ORDER BY created_at DESC LIMIT 200").all();const items=db.prepare('SELECT code,quantity FROM order_items WHERE order_id=?');const shipment=db.prepare('SELECT shipped_at FROM shipments WHERE order_id=?');res.json({orders:orders.map(o=>({id:o.id,sessionId:o.session_id,status:o.status,createdAt:o.created_at,items:items.all(o.id),shippedAt:shipment.get(o.id)?.shipped_at||null}))})});
+app.post('/api/admin/shipments',adminGate,(req,res)=>{const id=req.body?.orderId,shipped=req.body?.shipped;if(typeof id!=='string'||typeof shipped!=='boolean')return res.sendStatus(400);const order=db.prepare('SELECT status FROM orders WHERE id=?').get(id);if(!order||order.status!=='paid')return res.status(409).json({error:'支払い済みの注文のみ更新できます'});db.prepare('INSERT INTO shipments(order_id,shipped_at) VALUES (?,?) ON CONFLICT(order_id) DO UPDATE SET shipped_at=excluded.shipped_at').run(id,shipped?Date.now():null);res.json({ok:true})});
 app.get('/api/status',(req,res)=>{expireReservations();res.json({checkoutEnabled:configured,mode:'test',stock:Object.fromEntries(db.prepare('SELECT code,quantity FROM stock').all().map(x=>[x.code,x.quantity]))})});
 app.get('/api/order-status',async(req,res)=>{const sid=String(req.query.session_id||'');if(!/^cs_test_[A-Za-z0-9_]+$/.test(sid)||sid.length>255)return res.status(400).json({error:'無効な決済情報です'});if(!stripe)return res.sendStatus(503);try{const session=await stripe.checkout.sessions.retrieve(sid);const order=db.prepare('SELECT id,status FROM orders WHERE session_id=?').get(sid);if(!order)return res.status(404).json({error:'注文が見つかりません'});const items=db.prepare('SELECT code,quantity FROM order_items WHERE order_id=?').all(order.id);res.setHeader('Cache-Control','no-store');res.json({paymentStatus:session.payment_status,status:order.status,items,total:session.amount_total,currency:session.currency,shipping:'展示終了後に発送します（発送予定日は別途ご案内します）'})}catch(e){res.status(502).json({error:'注文情報を確認できませんでした'})}});
 app.post('/api/checkout',async(req,res)=>{if(!configured)return res.status(503).json({error:'決済は準備中です'});
