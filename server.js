@@ -3,7 +3,7 @@ const express=require('express'),Stripe=require('stripe'),Database=require('bett
 const app=express(),PORT=process.env.PORT||8080;
 app.use((req,res,next)=>{const origin=req.headers.origin;if(origin==='https://naruhito22-collab.github.io'){res.setHeader('Access-Control-Allow-Origin',origin);res.setHeader('Vary','Origin');res.setHeader('Access-Control-Allow-Headers','Content-Type');res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS')}if(req.method==='OPTIONS')return res.sendStatus(204);next()});
 const stripeKey=process.env.STRIPE_SECRET_KEY||'',webhookSecret=process.env.STRIPE_WEBHOOK_SECRET||'';
-const paymentMode=stripeKey.startsWith('sk_live_')?'live':'test';
+const paymentMode=/^(sk|rk)_live_/.test(stripeKey)?'live':'test';
 const dataDir=process.env.DATA_DIR||'/data';
 fs.mkdirSync(dataDir,{recursive:true});
 const db=new Database(path.join(dataDir,paymentMode==='live'?'noor-store-live.sqlite':'noor-store.sqlite'));
@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS shipments(order_id TEXT PRIMARY KEY, shipped_at INTEG
 const codes=['C','G','F','S','M','D'].flatMap(x=>[1,2,3].map(n=>x+'0'+n));
 const init=db.prepare('INSERT OR IGNORE INTO stock(code,quantity) VALUES (?,9)');
 db.transaction(()=>codes.forEach(c=>init.run(c)))();
-const stripe=/^sk_(test|live)_/.test(stripeKey)?new Stripe(stripeKey):null;
+const stripe=/^(sk|rk)_(test|live)_/.test(stripeKey)?new Stripe(stripeKey):null;
 const configured=!!(stripe&&webhookSecret.startsWith('whsec_')&&process.env.CHECKOUT_ENABLED==='true');
 const release=db.transaction(id=>{const order=db.prepare('SELECT status FROM orders WHERE id=?').get(id);if(!order||order.status!=='reserved')return;for(const row of db.prepare('SELECT code,quantity FROM order_items WHERE order_id=?').all(id))db.prepare('UPDATE stock SET quantity=quantity+? WHERE code=?').run(row.quantity,row.code);db.prepare("UPDATE orders SET status='released' WHERE id=?").run(id)});
 function expireReservations(){for(const o of db.prepare("SELECT id FROM orders WHERE status='reserved' AND expires_at<?").all(Date.now()))release(o.id)}
